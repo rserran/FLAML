@@ -245,12 +245,13 @@ class TimeSeriesDataset:
 
         else:
             if isinstance(y_pred, np.ndarray):
-                raise ValueError("Can't enrich np.ndarray as self.test_data is None")
+                y_pred = pd.DataFrame(data=y_pred, columns=self.target_names)
             elif isinstance(y_pred, pd.Series):
                 assert len(self.target_names) == 1, "Not enough columns in y_pred"
                 y_pred = pd.DataFrame({self.target_names[0]: y_pred})
-            # TODO auto-create the timestamps for the time column instead of throwing
-            raise NotImplementedError("Need a non-None test_data for this to work, for now")
+            if self.time_col not in y_pred.columns:
+                forward_frame = create_forward_frame(self.frequency, len(y_pred), self.end_date, self.time_col)
+                y_pred[self.time_col] = forward_frame[self.time_col].values
 
         assert isinstance(y_pred, pd.DataFrame)
         assert self.time_col in y_pred.columns
@@ -499,10 +500,18 @@ class DataTransformerTS:
 def create_forward_frame(
     frequency: str,
     steps: int,
-    test_end_date: datetime.datetime,
+    last_timestamp: datetime.datetime,
     time_col: str,
 ):
-    start_date = test_end_date + pd.Timedelta(1, frequency)
+    if frequency is None:
+        raise ValueError("frequency cannot be None")
+    if last_timestamp is None or pd.isna(last_timestamp):
+        raise ValueError(f"last_timestamp cannot be None or NaT, got {last_timestamp!r}")
+    try:
+        offset = pd.tseries.frequencies.to_offset(frequency)
+    except ValueError as e:
+        raise ValueError(f"Invalid frequency {frequency!r}; expected a pandas offset alias.") from e
+    start_date = last_timestamp + offset
     times = pd.date_range(
         start=start_date,
         periods=steps,
